@@ -15,7 +15,7 @@ def sms():
     data = request.json
 
     # Telnyx SMS payload parsing
-    message = data["data"]["payload"]["text"]
+    message = data["data"]["payload"].get("text", "")
     sender = data["data"]["payload"]["from"]["phone_number"]
 
     text = f"📩 SMS from {sender}:\n{message}"
