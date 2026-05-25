@@ -1,6 +1,7 @@
 from flask import Flask, request
 import requests
 import os
+from datetime import datetime
 
 app = Flask(__name__)
 
@@ -8,10 +9,18 @@ BOT_TOKEN = "8186394956:AAEVkJD9tWssRu_5PzX8vPH4ajfXvpBskVQ"
 CHAT_ID = "8581143855"
 
 TELNYX_API_KEY = os.getenv("TELNYX_API_KEY")
-TELNYX_NUMBER = "+YOUR_REAL_TELNYX_NUMBER"
+TELNYX_NUMBER = "+YOUR_TELNYX_NUMBER"
 
-# simple test storage (NOT production-safe)
-last_sender = {}
+# inbox storage (temporary in-memory)
+inbox = {}  # {phone: {"messages": []}}
+
+def send_telegram(text):
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+    requests.post(url, json={
+        "chat_id": CHAT_ID,
+        "text": text
+    })
+
 
 @app.route("/sms", methods=["POST"])
 def sms():
@@ -19,31 +28,45 @@ def sms():
 
     message = data["data"]["payload"].get("text", "")
     sender = data["data"]["payload"]["from"]["phone_number"]
+    time = datetime.now().strftime("%H:%M:%S")
 
-    last_sender["number"] = sender
+    # create inbox entry if not exists
+    if sender not in inbox:
+        inbox[sender] = {"messages": []}
 
-    text = f"📩 SMS from {sender}:\n{message}"
-
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-
-    requests.post(url, json={
-        "chat_id": CHAT_ID,
-        "text": text
+    # store message
+    inbox[sender]["messages"].append({
+        "from": sender,
+        "text": message,
+        "time": time
     })
+
+    # format message for Telegram
+    text = f"📩 SMS from {sender} at {time}\n\n{message}\n\nReply with:\n/reply {sender} your message"
+
+    send_telegram(text)
 
     return {"ok": True}
 
 
 @app.route("/telegram", methods=["POST"])
 def telegram():
+    data = request.json
+
     try:
-        data = request.json
         message = data["message"]["text"]
 
-        recipient = last_sender.get("number")
+        # expected format: /reply +447... hello there
+        if not message.startswith("/reply"):
+            return {"ok": True}
 
-        if not recipient:
-            return {"error": "No sender stored"}
+        parts = message.split(" ", 2)
+
+        if len(parts) < 3:
+            return {"error": "Invalid format"}
+
+        recipient = parts[1]
+        text_message = parts[2]
 
         url = "https://api.telnyx.com/v2/messages"
 
@@ -55,14 +78,17 @@ def telegram():
         payload = {
             "from": TELNYX_NUMBER,
             "to": recipient,
-            "text": message
+            "text": text_message
         }
 
         requests.post(url, json=payload, headers=headers)
 
+        send_telegram(f"✅ Sent to {recipient}:\n{text_message}")
+
         return {"ok": True}
 
     except Exception as e:
+        send_telegram(f"❌ Error: {str(e)}")
         return {"error": str(e)}
 
 
