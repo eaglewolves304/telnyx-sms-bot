@@ -12,14 +12,21 @@ CHAT_ID = "8581143855"
 
 TELNYX_API_KEY = os.getenv("TELNYX_API_KEY")
 
+# memory (resets on restart)
 conversations = {}
 
 # ======================
-# TELEGRAM
+# TELEGRAM SENDER
 # ======================
 def send_telegram(text):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    requests.post(url, json={"chat_id": CHAT_ID, "text": text})
+    try:
+        requests.post(url, json={
+            "chat_id": CHAT_ID,
+            "text": text
+        })
+    except Exception as e:
+        print("TELEGRAM ERROR:", str(e))
 
 # ======================
 # SMS → TELEGRAM
@@ -36,6 +43,7 @@ def sms():
         sender = payload["from"]["phone_number"]
         to_number = payload["to"][0]["phone_number"]
 
+        # store mapping
         conversations[sender] = {
             "customer": sender,
             "your_number": to_number
@@ -100,7 +108,7 @@ def telegram():
             "text": text_message
         }
 
-        r = requests.post(url, json=payload, headers=headers)
+        requests.post(url, json=payload, headers=headers)
 
         send_telegram(f"""✅ Sent
 
@@ -118,7 +126,7 @@ To: {recipient}
         return {"error": str(e)}
 
 # ======================
-# VOICE API
+# VOICE (SAFE MODE ONLY - NO SIP BREAKING)
 # ======================
 @app.route("/voice", methods=["POST"])
 def voice():
@@ -129,19 +137,16 @@ def voice():
         event = data.get("data", {}).get("event_type", "")
         payload = data.get("data", {}).get("payload", {})
 
-        call_control_id = payload.get("call_control_id")
         from_number = payload.get("from")
         to_number = payload.get("to")
 
-        # 1. Incoming call → DO NOTHING (let SIP ring)
+        # ONLY LOG — DO NOT ANSWER OR RECORD
         if event == "call.initiated":
-            send_telegram(
-                f"📞 Incoming Call Ringing\n\nFrom: {from_number}\nTo: {to_number}"
-            )
+            send_telegram(f"""📞 Incoming Call
 
-        # 2. Only start voicemail when call is NOT answered
-        elif event == "call.answered":
-            send_telegram("📞 Call answered on Groundwire")
+From: {from_number}
+To: {to_number}
+""")
 
         elif event == "call.hangup":
             send_telegram("📞 Call ended")
@@ -151,6 +156,35 @@ def voice():
     except Exception as e:
         print("VOICE ERROR:", str(e))
         return {"error": str(e)}
+
+# ======================
+# CALL LOG (OPTIONAL DEBUG)
+# ======================
+@app.route("/call-log", methods=["POST"])
+def call_log():
+    data = request.json
+    print("CALL LOG:", data)
+
+    try:
+        payload = data["data"]["payload"]
+
+        from_number = payload.get("from")
+        to_number = payload.get("to")
+        status = payload.get("call_state", "unknown")
+
+        send_telegram(f"""📞 Call Event
+
+From: {from_number}
+To: {to_number}
+Status: {status}
+""")
+
+        return {"ok": True}
+
+    except Exception as e:
+        print("CALL LOG ERROR:", str(e))
+        return {"error": str(e)}
+
 # ======================
 # HEALTH CHECK
 # ======================
