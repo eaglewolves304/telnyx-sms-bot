@@ -11,9 +11,8 @@ BOT_TOKEN = "8186394956:AAF626X_G_qmsjpE7u8Ucsrlt2XqQN73nFI"
 CHAT_ID = "8581143855"
 
 TELNYX_API_KEY = os.getenv("TELNYX_API_KEY")
-TELNYX_NUMBER = "+YOUR_TELNYX_NUMBER"
 
-# simple memory (temporary inbox)
+# customer -> your number
 conversations = {}
 
 # ======================
@@ -21,10 +20,14 @@ conversations = {}
 # ======================
 def send_telegram(text):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    requests.post(url, json={
-        "chat_id": CHAT_ID,
-        "text": text
-    })
+
+    requests.post(
+        url,
+        json={
+            "chat_id": CHAT_ID,
+            "text": text
+        }
+    )
 
 # ======================
 # SMS → TELEGRAM
@@ -32,22 +35,23 @@ def send_telegram(text):
 @app.route("/sms", methods=["POST"])
 def sms():
     data = request.json
-print(data)
+
     print("SMS INCOMING:", data)
 
     try:
         payload = data["data"]["payload"]
 
- message = payload.get("text", "")
-sender = payload["from"]["phone_number"]
+        message = payload.get("text", "")
+        sender = payload["from"]["phone_number"]
+        to_number = payload["to"][0]["phone_number"]
 
-# which Telnyx number received the SMS
-to_number = payload["to"][0]["phone_number"]
+        # remember which of your numbers this customer texted
+        conversations[sender] = {
+            "customer": sender,
+            "your_number": to_number
+        }
 
-# store last sender (simple version)
-last_sender["number"] = sender
-
-text = f"""📩 SMS
+        text = f"""📩 SMS
 
 To: {to_number}
 From: {sender}
@@ -72,6 +76,7 @@ Reply:
 @app.route("/telegram", methods=["POST"])
 def telegram():
     data = request.json
+
     print("TELEGRAM INCOMING:", data)
 
     try:
@@ -80,28 +85,29 @@ def telegram():
         if not message:
             return {"ok": True}
 
-        # only handle /reply commands
         if not message.startswith("/reply"):
             return {"ok": True}
 
         parts = message.split(" ", 2)
 
         if len(parts) < 3:
-            send_telegram("⚠️ Format: /reply +44number your message")
+            send_telegram(
+                "⚠️ Format: /reply +44number your message"
+            )
             return {"error": "bad format"}
 
-       customer = parts[1]
-text_message = parts[2]
+        customer = parts[1]
+        text_message = parts[2]
 
-if customer not in conversations:
-    send_telegram(
-        f"❌ No conversation found for {customer}. "
-        f"The server may have restarted."
-    )
-    return {"error": "conversation not found"}
+        if customer not in conversations:
+            send_telegram(
+                f"❌ No conversation found for {customer}. "
+                f"The server may have restarted."
+            )
+            return {"error": "conversation not found"}
 
-recipient = conversations[customer]["customer"]
-from_number = conversations[customer]["your_number"]
+        recipient = conversations[customer]["customer"]
+        from_number = conversations[customer]["your_number"]
 
         url = "https://api.telnyx.com/v2/messages"
 
@@ -111,21 +117,25 @@ from_number = conversations[customer]["your_number"]
         }
 
         payload = {
-    "from": from_number,
-    "to": recipient,
-    "text": text_message
-}
+            "from": from_number,
+            "to": recipient,
+            "text": text_message
+        }
 
-        r = requests.post(url, json=payload, headers=headers)
+        r = requests.post(
+            url,
+            json=payload,
+            headers=headers
+        )
 
         print("TELNYX RESPONSE:", r.status_code, r.text)
 
         send_telegram(
-    f"✅ Sent\n\n"
-    f"From: {from_number}\n"
-    f"To: {recipient}\n\n"
-    f"{text_message}"
-)
+            f"✅ Sent\n\n"
+            f"From: {from_number}\n"
+            f"To: {recipient}\n\n"
+            f"{text_message}"
+        )
 
         return {"ok": True}
 
@@ -133,6 +143,13 @@ from_number = conversations[customer]["your_number"]
         print("TELEGRAM ERROR:", str(e))
         send_telegram(f"❌ Error: {str(e)}")
         return {"error": str(e)}
+
+# ======================
+# HEALTH CHECK
+# ======================
+@app.route("/")
+def home():
+    return "OK"
 
 # ======================
 # RUN SERVER
