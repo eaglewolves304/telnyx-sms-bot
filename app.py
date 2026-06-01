@@ -126,21 +126,48 @@ def voice():
     print("VOICE INCOMING:", data)
 
     try:
-        event = data.get("data", {}).get("event_type")
-
+        event = data.get("data", {}).get("event_type", "")
         payload = data.get("data", {}).get("payload", {})
 
+        call_control_id = payload.get("call_control_id")
+        from_number = payload.get("from")
+        to_number = payload.get("to")
+
+        # 1. Incoming call → answer it
         if event == "call.initiated":
-            from_number = payload.get("from")
-            to_number = payload.get("to")
+            send_telegram(
+                f"📞 Incoming Call\n\nFrom: {from_number}\nTo: {to_number}"
+            )
 
-            send_telegram(f"📞 Incoming Call\n\nFrom: {from_number}\nTo: {to_number}")
+            # ANSWER CALL
+            requests.post(
+                f"https://api.telnyx.com/v2/calls/{call_control_id}/actions/answer",
+                headers={
+                    "Authorization": f"Bearer {TELNYX_API_KEY}",
+                    "Content-Type": "application/json"
+                },
+                json={}
+            )
 
+        # 2. After answering → start voicemail recording
         elif event == "call.answered":
-            send_telegram("📞 Call answered")
+            requests.post(
+                f"https://api.telnyx.com/v2/calls/{call_control_id}/actions/record_start",
+                headers={
+                    "Authorization": f"Bearer {TELNYX_API_KEY}",
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "format": "mp3",
+                    "channels": "single"
+                }
+            )
 
+            send_telegram("🎙️ Recording started (voicemail mode)")
+
+        # 3. Call ends → notify + later we’ll attach recording URL
         elif event == "call.hangup":
-            send_telegram("📞 Call ended")
+            send_telegram("📞 Call ended (voicemail saved if recorded)")
 
         return {"ok": True}
 
