@@ -195,33 +195,21 @@ def voice():
     data = request.json
     print("VOICE INCOMING:", data)
 
-    try:
-        event = data.get("data", {}).get("event_type", "")
-        payload = data.get("data", {}).get("payload", {})
+    # ALWAYS respond immediately
+    event = data.get("data", {}).get("event_type", "")
+    payload = data.get("data", {}).get("payload", {})
 
-        from_number = payload.get("from")
-        to_number = payload.get("to")
+    from_number = payload.get("from")
+    to_number = payload.get("to")
 
-        if event == "call.initiated":
-            update_session(from_number, to_number, "Incoming Call", "CALL")
+    # ONLY LOG (NO NETWORK CALLS HERE)
+    if event == "call.initiated":
+        print(f"RINGING: {from_number} -> {to_number}")
 
-        elif event == "call.hangup":
-            update_session(from_number, to_number, "Missed Call", "CALL")
+    elif event == "call.hangup":
+        print(f"HANGUP: {from_number} -> {to_number}")
 
-            send_telegram(f"""📞 MISSED CALL
-
-From: {from_number}
-To: {to_number}
-
----
-{render_inbox()}
-""")
-
-        return {"ok": True}
-
-    except Exception as e:
-        print("VOICE ERROR:", str(e))
-        return {"error": str(e)}
+    return {"ok": True}
 
 # ======================
 # CALL LOG (OPTIONAL)
