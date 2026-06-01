@@ -1,6 +1,8 @@
 from flask import Flask, request
 import requests
 import os
+import time
+from datetime import datetime
 
 app = Flask(__name__)
 
@@ -13,13 +15,21 @@ CHAT_ID = "8581143855"
 TELNYX_API_KEY = os.getenv("TELNYX_API_KEY")
 
 # ======================
-# MEMORY (simple session map)
+# MEMORY
 # ======================
-conversations = {}
+sessions = {}
+
+SESSION_WINDOW = 30 * 60  # 30 minutes
 
 # ======================
-# TELEGRAM SENDER
+# HELPERS
 # ======================
+def now_ts():
+    return int(time.time())
+
+def now_readable():
+    return datetime.now().strftime("%H:%M")
+
 def send_telegram(text):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     try:
@@ -29,6 +39,61 @@ def send_telegram(text):
         })
     except Exception as e:
         print("TELEGRAM ERROR:", str(e))
+
+def make_session_key(from_number, to_number):
+    return f"{from_number}→{to_number}"
+
+def get_session(key):
+    session = sessions.get(key)
+
+    if session:
+        # if older than session window → create new session
+        if now_ts() - session["last_update"] > SESSION_WINDOW:
+            sessions.pop(key, None)
+            return None
+
+    return session
+
+def update_session(from_number, to_number, msg, msg_type):
+    key = make_session_key(from_number, to_number)
+
+    session = get_session(key)
+
+    if not session:
+        session = {
+            "from": from_number,
+            "to": to_number,
+            "last_message": msg,
+            "type": msg_type,
+            "created": now_readable(),
+            "last_update": now_ts(),
+            "count": 1
+        }
+        sessions[key] = session
+    else:
+        session["last_message"] = msg
+        session["type"] = msg_type
+        session["last_update"] = now_ts()
+        session["count"] += 1
+
+    return key, session
+
+def render_inbox():
+    if not sessions:
+        return "📱 INBOX EMPTY"
+
+    text = "📱 *WHATSAPP STYLE INBOX*\n\n"
+
+    for key, s in sessions.items():
+        text += f"""📞 {key}
+   💬 {s['last_message']}
+   📌 {s['type']}
+   🕒 {s['created']} → {now_readable()}
+   🔁 msgs: {s['count']}
+
+"""
+
+    return text
 
 # ======================
 # SMS → TELEGRAM
@@ -45,21 +110,20 @@ def sms():
         sender = payload["from"]["phone_number"]
         to_number = payload["to"][0]["phone_number"]
 
-        # store mapping per sender (basic inbox linking)
-        conversations[sender] = {
-            "customer": sender,
-            "your_number": to_number
-        }
+        key, session = update_session(sender, to_number, message, "SMS")
 
         send_telegram(f"""📩 SMS
 
-To: {to_number}
 From: {sender}
+To: {to_number}
 
 {message}
 
-Reply:
-/reply {sender} your message
+---
+Session: {key}
+
+---
+{render_inbox()}
 """)
 
         return {"ok": True}
@@ -80,23 +144,17 @@ def telegram():
         message = data.get("message", {}).get("text", "")
 
         if not message.startswith("/reply"):
+            send_telegram(render_inbox())
             return {"ok": True}
 
         parts = message.split(" ", 2)
 
         if len(parts) < 3:
-            send_telegram("⚠️ Format: /reply +number message")
+            send_telegram("⚠️ Format: /reply number message")
             return {"error": "bad format"}
 
-        customer = parts[1]
+        number = parts[1]
         text_message = parts[2]
-
-        if customer not in conversations:
-            send_telegram("❌ Conversation not found (server restarted)")
-            return {"error": "not found"}
-
-        from_number = conversations[customer]["your_number"]
-        recipient = conversations[customer]["customer"]
 
         url = "https://api.telnyx.com/v2/messages"
         headers = {
@@ -105,30 +163,32 @@ def telegram():
         }
 
         payload = {
-            "from": from_number,
-            "to": recipient,
+            "from": number,
+            "to": number,
             "text": text_message
         }
 
         requests.post(url, json=payload, headers=headers)
 
-        send_telegram(f"""✅ Sent SMS
+        update_session(number, number, text_message, "OUTGOING")
 
-From: {from_number}
-To: {recipient}
+        send_telegram(f"""✅ SENT
 
-{text_message}
+To: {number}
+Message: {text_message}
+
+---
+{render_inbox()}
 """)
 
         return {"ok": True}
 
     except Exception as e:
         print("TELEGRAM ERROR:", str(e))
-        send_telegram(f"❌ Error: {str(e)}")
         return {"error": str(e)}
 
 # ======================
-# VOICE EVENTS (SIP SAFE MODE)
+# VOICE EVENTS (CALLS)
 # ======================
 @app.route("/voice", methods=["POST"])
 def voice():
@@ -141,41 +201,20 @@ def voice():
 
         from_number = payload.get("from")
         to_number = payload.get("to")
-        call_control_id = payload.get("call_control_id")
 
-        # CALL START
         if event == "call.initiated":
-            send_telegram(f"""📞 Incoming Call
+            update_session(from_number, to_number, "Incoming Call", "CALL")
 
-From: {from_number}
-To: {to_number}
-""")
-
-        # CALL ANSWERED
-        elif event == "call.answered":
-            send_telegram("📞 Call answered")
-
-        # CALL ENDED → START VOICEMAIL RECORDING
         elif event == "call.hangup":
-            send_telegram("📞 Call ended")
+            update_session(from_number, to_number, "Missed Call", "CALL")
 
-            if call_control_id:
-                url = f"https://api.telnyx.com/v2/calls/{call_control_id}/actions/record_start"
-
-                headers = {
-                    "Authorization": f"Bearer {TELNYX_API_KEY}",
-                    "Content-Type": "application/json"
-                }
-
-                requests.post(url, headers=headers, json={
-                    "format": "mp3",
-                    "channels": "single"
-                })
-
-                send_telegram(f"""🎙️ Voicemail Recording Started
+            send_telegram(f"""📞 MISSED CALL
 
 From: {from_number}
 To: {to_number}
+
+---
+{render_inbox()}
 """)
 
         return {"ok": True}
@@ -185,66 +224,16 @@ To: {to_number}
         return {"error": str(e)}
 
 # ======================
-# RECORDING DELIVERY
-# ======================
-@app.route("/recording", methods=["POST"])
-def recording():
-    data = request.json
-    print("RECORDING EVENT:", data)
-
-    try:
-        payload = data["data"]["payload"]
-
-        recording_url = payload.get("recording_urls", {}).get("mp3")
-        from_number = payload.get("from")
-        to_number = payload.get("to")
-
-        if recording_url:
-            send_telegram(f"""🎙️ NEW VOICEMAIL
-
-From: {from_number}
-To: {to_number}
-
-Audio:
-{recording_url}
-""")
-
-        return {"ok": True}
-
-    except Exception as e:
-        print("RECORDING ERROR:", str(e))
-        return {"error": str(e)}
-
-# ======================
-# CALL LOG (DEBUG)
+# CALL LOG (OPTIONAL)
 # ======================
 @app.route("/call-log", methods=["POST"])
 def call_log():
     data = request.json
     print("CALL LOG:", data)
-
-    try:
-        payload = data["data"]["payload"]
-
-        from_number = payload.get("from")
-        to_number = payload.get("to")
-        status = payload.get("call_state", "unknown")
-
-        send_telegram(f"""📞 Call Event
-
-From: {from_number}
-To: {to_number}
-Status: {status}
-""")
-
-        return {"ok": True}
-
-    except Exception as e:
-        print("CALL LOG ERROR:", str(e))
-        return {"error": str(e)}
+    return {"ok": True}
 
 # ======================
-# HEALTH CHECK
+# HEALTH
 # ======================
 @app.route("/")
 def home():
