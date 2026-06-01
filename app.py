@@ -29,7 +29,7 @@ def now_ts():
     return int(time.time())
 
 def now_readable():
-    return datetime.now().strftime("%H:%M")
+    return datetime.now().strftime("%Y-%m-%d %H:%M")
 
 def send_telegram(text):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
