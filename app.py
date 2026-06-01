@@ -133,49 +133,24 @@ def voice():
         from_number = payload.get("from")
         to_number = payload.get("to")
 
-        # 1. Incoming call → answer it
+        # 1. Incoming call → DO NOTHING (let SIP ring)
         if event == "call.initiated":
             send_telegram(
-                f"📞 Incoming Call\n\nFrom: {from_number}\nTo: {to_number}"
+                f"📞 Incoming Call Ringing\n\nFrom: {from_number}\nTo: {to_number}"
             )
 
-            # ANSWER CALL
-            requests.post(
-                f"https://api.telnyx.com/v2/calls/{call_control_id}/actions/answer",
-                headers={
-                    "Authorization": f"Bearer {TELNYX_API_KEY}",
-                    "Content-Type": "application/json"
-                },
-                json={}
-            )
-
-        # 2. After answering → start voicemail recording
+        # 2. Only start voicemail when call is NOT answered
         elif event == "call.answered":
-            requests.post(
-                f"https://api.telnyx.com/v2/calls/{call_control_id}/actions/record_start",
-                headers={
-                    "Authorization": f"Bearer {TELNYX_API_KEY}",
-                    "Content-Type": "application/json"
-                },
-                json={
-                    "format": "mp3",
-                    "channels": "single"
-                }
-            )
+            send_telegram("📞 Call answered on Groundwire")
 
-            send_telegram("🎙️ Recording started (voicemail mode)")
-
-        # 3. Call ends → notify + later we’ll attach recording URL
         elif event == "call.hangup":
-            send_telegram("📞 Call ended (voicemail saved if recorded)")
+            send_telegram("📞 Call ended")
 
         return {"ok": True}
 
     except Exception as e:
         print("VOICE ERROR:", str(e))
-        send_telegram(f"❌ Voice error: {str(e)}")
         return {"error": str(e)}
-
 # ======================
 # HEALTH CHECK
 # ======================
