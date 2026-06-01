@@ -18,8 +18,9 @@ TELNYX_API_KEY = os.getenv("TELNYX_API_KEY")
 # MEMORY
 # ======================
 sessions = {}
+active_calls = {}   # ✅ FIXED (WAS MISSING)
 
-SESSION_WINDOW = 30 * 60  # 30 minutes
+SESSION_WINDOW = 30 * 60
 
 # ======================
 # HELPERS
@@ -46,11 +47,9 @@ def make_session_key(from_number, to_number):
 def get_session(key):
     session = sessions.get(key)
 
-    if session:
-        # if older than session window → create new session
-        if now_ts() - session["last_update"] > SESSION_WINDOW:
-            sessions.pop(key, None)
-            return None
+    if session and (now_ts() - session["last_update"] > SESSION_WINDOW):
+        sessions.pop(key, None)
+        return None
 
     return session
 
@@ -86,10 +85,10 @@ def render_inbox():
 
     for key, s in sessions.items():
         text += f"""📞 {key}
-   💬 {s['last_message']}
-   📌 {s['type']}
-   🕒 {s['created']} → {now_readable()}
-   🔁 msgs: {s['count']}
+💬 {s['last_message']}
+📌 {s['type']}
+🕒 {s['created']} → {now_readable()}
+🔁 msgs: {s['count']}
 
 """
 
@@ -110,7 +109,7 @@ def sms():
         sender = payload["from"]["phone_number"]
         to_number = payload["to"][0]["phone_number"]
 
-        key, session = update_session(sender, to_number, message, "SMS")
+        update_session(sender, to_number, message, "SMS")
 
         send_telegram(f"""📩 SMS
 
@@ -118,9 +117,6 @@ From: {sender}
 To: {to_number}
 
 {message}
-
----
-Session: {key}
 
 ---
 {render_inbox()}
@@ -239,8 +235,7 @@ To: {to_number}
                 "time": now_readable()
             })
 
-            # 🟥 THIS IS THE IMPORTANT PART
-            if not call.get("answered"):
+            if not call["answered"]:
                 send_telegram(f"""📞 MISSED CALL
 
 From: {call['from']}
@@ -254,7 +249,6 @@ From: {call['from']}
 To: {call['to']}
 """)
 
-            # cleanup
             active_calls.pop(call_id, None)
 
         return {"ok": True}
@@ -264,7 +258,7 @@ To: {call['to']}
         return {"error": str(e)}
 
 # ======================
-# CALL LOG (OPTIONAL)
+# CALL LOG
 # ======================
 @app.route("/call-log", methods=["POST"])
 def call_log():
