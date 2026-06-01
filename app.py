@@ -7,14 +7,14 @@ app = Flask(__name__)
 # ======================
 # CONFIG
 # ======================
-BOT_TOKEN = "8186394956:AAF626X_G_qmsjpE7u8Ucsrlt2XqQN73nFI"
-CHAT_ID = "8581143855"
+BOT_TOKEN = "TOKEN"
+CHAT_ID = "8186394956:AAF626X_G_qmsjpE7u8Ucsrlt2XqQN73nFI"
 
 TELNYX_API_KEY = os.getenv("TELNYX_API_KEY")
 TELNYX_NUMBER = "+YOUR_TELNYX_NUMBER"
 
 # simple memory (temporary inbox)
-last_sender = {}
+conversations = {}
 
 # ======================
 # TELEGRAM SENDER
@@ -32,6 +32,7 @@ def send_telegram(text):
 @app.route("/sms", methods=["POST"])
 def sms():
     data = request.json
+print(data)
     print("SMS INCOMING:", data)
 
     try:
