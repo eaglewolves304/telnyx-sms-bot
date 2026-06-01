@@ -13,7 +13,7 @@ CHAT_ID = "8581143855"
 TELNYX_API_KEY = os.getenv("TELNYX_API_KEY")
 
 # ======================
-# MEMORY (simple inbox map)
+# MEMORY (simple session map)
 # ======================
 conversations = {}
 
@@ -45,7 +45,7 @@ def sms():
         sender = payload["from"]["phone_number"]
         to_number = payload["to"][0]["phone_number"]
 
-        # store mapping per sender
+        # store mapping per sender (basic inbox linking)
         conversations[sender] = {
             "customer": sender,
             "your_number": to_number
@@ -79,7 +79,7 @@ def telegram():
     try:
         message = data.get("message", {}).get("text", "")
 
-        if not message or not message.startswith("/reply"):
+        if not message.startswith("/reply"):
             return {"ok": True}
 
         parts = message.split(" ", 2)
@@ -95,8 +95,8 @@ def telegram():
             send_telegram("❌ Conversation not found (server restarted)")
             return {"error": "not found"}
 
-        recipient = conversations[customer]["customer"]
         from_number = conversations[customer]["your_number"]
+        recipient = conversations[customer]["customer"]
 
         url = "https://api.telnyx.com/v2/messages"
         headers = {
@@ -112,7 +112,7 @@ def telegram():
 
         requests.post(url, json=payload, headers=headers)
 
-        send_telegram(f"""✅ Sent
+        send_telegram(f"""✅ Sent SMS
 
 From: {from_number}
 To: {recipient}
@@ -128,7 +128,7 @@ To: {recipient}
         return {"error": str(e)}
 
 # ======================
-# VOICE (SAFE SIP MODE)
+# VOICE EVENTS (SIP SAFE MODE)
 # ======================
 @app.route("/voice", methods=["POST"])
 def voice():
@@ -139,9 +139,9 @@ def voice():
         event = data.get("data", {}).get("event_type", "")
         payload = data.get("data", {}).get("payload", {})
 
-        call_control_id = payload.get("call_control_id")
         from_number = payload.get("from")
         to_number = payload.get("to")
+        call_control_id = payload.get("call_control_id")
 
         # CALL START
         if event == "call.initiated":
@@ -153,14 +153,12 @@ To: {to_number}
 
         # CALL ANSWERED
         elif event == "call.answered":
-            send_telegram(f"📞 Call answered")
+            send_telegram("📞 Call answered")
 
-        # CALL ENDED → TRIGGER VOICEMAIL START
+        # CALL ENDED → START VOICEMAIL RECORDING
         elif event == "call.hangup":
+            send_telegram("📞 Call ended")
 
-            send_telegram(f"📞 Call ended → checking voicemail")
-
-            # start voicemail recording safely AFTER call ends
             if call_control_id:
                 url = f"https://api.telnyx.com/v2/calls/{call_control_id}/actions/record_start"
 
@@ -187,7 +185,38 @@ To: {to_number}
         return {"error": str(e)}
 
 # ======================
-# CALL LOG (DEBUG ONLY)
+# RECORDING DELIVERY
+# ======================
+@app.route("/recording", methods=["POST"])
+def recording():
+    data = request.json
+    print("RECORDING EVENT:", data)
+
+    try:
+        payload = data["data"]["payload"]
+
+        recording_url = payload.get("recording_urls", {}).get("mp3")
+        from_number = payload.get("from")
+        to_number = payload.get("to")
+
+        if recording_url:
+            send_telegram(f"""🎙️ NEW VOICEMAIL
+
+From: {from_number}
+To: {to_number}
+
+Audio:
+{recording_url}
+""")
+
+        return {"ok": True}
+
+    except Exception as e:
+        print("RECORDING ERROR:", str(e))
+        return {"error": str(e)}
+
+# ======================
+# CALL LOG (DEBUG)
 # ======================
 @app.route("/call-log", methods=["POST"])
 def call_log():
