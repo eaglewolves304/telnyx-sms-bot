@@ -195,21 +195,73 @@ def voice():
     data = request.json
     print("VOICE INCOMING:", data)
 
-    # ALWAYS respond immediately
-    event = data.get("data", {}).get("event_type", "")
-    payload = data.get("data", {}).get("payload", {})
+    try:
+        event = data.get("data", {}).get("event_type", "")
+        payload = data.get("data", {}).get("payload", {})
 
-    from_number = payload.get("from")
-    to_number = payload.get("to")
+        call_id = payload.get("call_control_id")
+        from_number = payload.get("from")
+        to_number = payload.get("to")
 
-    # ONLY LOG (NO NETWORK CALLS HERE)
-    if event == "call.initiated":
-        print(f"RINGING: {from_number} -> {to_number}")
+        # -------------------------
+        # CALL STARTED
+        # -------------------------
+        if event == "call.initiated":
+            active_calls[call_id] = {
+                "from": from_number,
+                "to": to_number,
+                "answered": False,
+                "time": now_readable()
+            }
 
-    elif event == "call.hangup":
-        print(f"HANGUP: {from_number} -> {to_number}")
+        # -------------------------
+        # CALL ANSWERED
+        # -------------------------
+        elif event == "call.answered":
+            if call_id in active_calls:
+                active_calls[call_id]["answered"] = True
 
-    return {"ok": True}
+            send_telegram(f"""📞 CALL ANSWERED
+
+From: {from_number}
+To: {to_number}
+""")
+
+        # -------------------------
+        # CALL ENDED
+        # -------------------------
+        elif event == "call.hangup":
+
+            call = active_calls.get(call_id, {
+                "from": from_number,
+                "to": to_number,
+                "answered": False,
+                "time": now_readable()
+            })
+
+            # 🟥 THIS IS THE IMPORTANT PART
+            if not call.get("answered"):
+                send_telegram(f"""📞 MISSED CALL
+
+From: {call['from']}
+To: {call['to']}
+Time: {call['time']}
+""")
+            else:
+                send_telegram(f"""📞 CALL ENDED
+
+From: {call['from']}
+To: {call['to']}
+""")
+
+            # cleanup
+            active_calls.pop(call_id, None)
+
+        return {"ok": True}
+
+    except Exception as e:
+        print("VOICE ERROR:", str(e))
+        return {"error": str(e)}
 
 # ======================
 # CALL LOG (OPTIONAL)
