@@ -90,8 +90,18 @@ def telegram():
             send_telegram("⚠️ Format: /reply +44number your message")
             return {"error": "bad format"}
 
-        recipient = parts[1]
-        text_message = parts[2]
+       customer = parts[1]
+text_message = parts[2]
+
+if customer not in conversations:
+    send_telegram(
+        f"❌ No conversation found for {customer}. "
+        f"The server may have restarted."
+    )
+    return {"error": "conversation not found"}
+
+recipient = conversations[customer]["customer"]
+from_number = conversations[customer]["your_number"]
 
         url = "https://api.telnyx.com/v2/messages"
 
@@ -101,16 +111,21 @@ def telegram():
         }
 
         payload = {
-            "from": TELNYX_NUMBER,
-            "to": recipient,
-            "text": text_message
-        }
+    "from": from_number,
+    "to": recipient,
+    "text": text_message
+}
 
         r = requests.post(url, json=payload, headers=headers)
 
         print("TELNYX RESPONSE:", r.status_code, r.text)
 
-        send_telegram(f"✅ Sent to {recipient}:\n{text_message}")
+        send_telegram(
+    f"✅ Sent\n\n"
+    f"From: {from_number}\n"
+    f"To: {recipient}\n\n"
+    f"{text_message}"
+)
 
         return {"ok": True}
 
