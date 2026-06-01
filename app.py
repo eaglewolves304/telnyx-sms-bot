@@ -12,7 +12,9 @@ CHAT_ID = "8581143855"
 
 TELNYX_API_KEY = os.getenv("TELNYX_API_KEY")
 
-# memory (resets on restart)
+# ======================
+# MEMORY (simple inbox map)
+# ======================
 conversations = {}
 
 # ======================
@@ -43,7 +45,7 @@ def sms():
         sender = payload["from"]["phone_number"]
         to_number = payload["to"][0]["phone_number"]
 
-        # store mapping
+        # store mapping per sender
         conversations[sender] = {
             "customer": sender,
             "your_number": to_number
@@ -126,7 +128,7 @@ To: {recipient}
         return {"error": str(e)}
 
 # ======================
-# VOICE (SAFE MODE ONLY - NO SIP BREAKING)
+# VOICE (SAFE SIP MODE)
 # ======================
 @app.route("/voice", methods=["POST"])
 def voice():
@@ -137,10 +139,11 @@ def voice():
         event = data.get("data", {}).get("event_type", "")
         payload = data.get("data", {}).get("payload", {})
 
+        call_control_id = payload.get("call_control_id")
         from_number = payload.get("from")
         to_number = payload.get("to")
 
-        # ONLY LOG — DO NOT ANSWER OR RECORD
+        # CALL START
         if event == "call.initiated":
             send_telegram(f"""📞 Incoming Call
 
@@ -148,8 +151,34 @@ From: {from_number}
 To: {to_number}
 """)
 
+        # CALL ANSWERED
+        elif event == "call.answered":
+            send_telegram(f"📞 Call answered")
+
+        # CALL ENDED → TRIGGER VOICEMAIL START
         elif event == "call.hangup":
-            send_telegram("📞 Call ended")
+
+            send_telegram(f"📞 Call ended → checking voicemail")
+
+            # start voicemail recording safely AFTER call ends
+            if call_control_id:
+                url = f"https://api.telnyx.com/v2/calls/{call_control_id}/actions/record_start"
+
+                headers = {
+                    "Authorization": f"Bearer {TELNYX_API_KEY}",
+                    "Content-Type": "application/json"
+                }
+
+                requests.post(url, headers=headers, json={
+                    "format": "mp3",
+                    "channels": "single"
+                })
+
+                send_telegram(f"""🎙️ Voicemail Recording Started
+
+From: {from_number}
+To: {to_number}
+""")
 
         return {"ok": True}
 
@@ -158,7 +187,7 @@ To: {to_number}
         return {"error": str(e)}
 
 # ======================
-# CALL LOG (OPTIONAL DEBUG)
+# CALL LOG (DEBUG ONLY)
 # ======================
 @app.route("/call-log", methods=["POST"])
 def call_log():
