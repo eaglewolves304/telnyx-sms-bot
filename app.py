@@ -37,13 +37,25 @@ def sms():
     try:
         payload = data["data"]["payload"]
 
-        message = payload.get("text", "")
-        sender = payload["from"]["phone_number"]
+ message = payload.get("text", "")
+sender = payload["from"]["phone_number"]
 
-        # store last sender (simple version)
-        last_sender["number"] = sender
+# which Telnyx number received the SMS
+to_number = payload["to"][0]["phone_number"]
 
-        text = f"📩 SMS from {sender}:\n\n{message}\n\nReply:\n/reply {sender} your message"
+# store last sender (simple version)
+last_sender["number"] = sender
+
+text = f"""📩 SMS
+
+To: {to_number}
+From: {sender}
+
+{message}
+
+Reply:
+/reply {sender} your message
+"""
 
         send_telegram(text)
 
