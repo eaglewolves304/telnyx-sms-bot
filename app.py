@@ -272,6 +272,13 @@ def call_log():
 @app.route("/")
 def home():
     return "OK"
+# ======================
+# TEMP DELETE
+# ======================
+@app.route("/test")
+def test():
+    send_telegram("✅ Telegram test successful")
+    return "sent"
 
 # ======================
 # RUN
