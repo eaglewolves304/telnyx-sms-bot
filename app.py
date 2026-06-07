@@ -285,3 +285,22 @@ def test():
 # ======================
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
+
+# ======================
+# FAX
+# ======================
+def send_fax(to_number, pdf_url):
+    url = "https://api.telnyx.com/v2/faxes"
+
+    headers = {
+        "Authorization": f"Bearer {TELNYX_API_KEY}",
+        "Content-Type": "application/json"
+    }
+
+    payload = {
+        "to": to_number,
+        "from": TELNYX_FAX_NUMBER,
+        "media_url": pdf_url
+    }
+
+    return requests.post(url, json=payload, headers=headers).json()
