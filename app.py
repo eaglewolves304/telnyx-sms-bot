@@ -9,8 +9,8 @@ app = Flask(__name__)
 # ======================
 # CONFIG
 # ======================
-BOT_TOKEN = "8186394956:AAF626X_G_qmsjpE7u8Ucsrlt2XqQN73nFI"
-CHAT_ID = "8581143855"
+BOT_TOKEN = "8910700335:AAF4JC7uQ-FFF4FPfd2y9zJd1zH64d3MK4o"
+CHAT_ID = "8910700335"
 
 TELNYX_API_KEY = os.getenv("TELNYX_API_KEY")
 
