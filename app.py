@@ -14,6 +14,18 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 TELNYX_API_KEY = os.getenv("TELNYX_API_KEY")
 # ======================
+# DEBUG  MAY DELETE
+# ======================
+import os
+
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+CHAT_ID = os.getenv("CHAT_ID")
+TELNYX_API_KEY = os.getenv("TELNYX_API_KEY")
+
+print("BOT_TOKEN:", BOT_TOKEN)
+print("CHAT_ID:", CHAT_ID)
+print("TELNYX_API_KEY:", bool(TELNYX_API_KEY))
+# ======================
 # MEMORY
 # ======================
 sessions = {}
