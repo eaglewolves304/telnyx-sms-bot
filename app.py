@@ -11,7 +11,7 @@ app = Flask(__name__)
 # ======================
 import os
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-CHAT_ID = "8581143855"
+CHAT_ID = os.getenv("CHAT_ID")
 
 TELNYX_API_KEY = os.getenv("TELNYX_API_KEY")
 
