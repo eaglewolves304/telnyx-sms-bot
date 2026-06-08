@@ -9,33 +9,20 @@ app = Flask(__name__)
 # ======================
 # CONFIG
 # ======================
-import os
-
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 TELNYX_API_KEY = os.getenv("TELNYX_API_KEY")
 
 if not BOT_TOKEN or not CHAT_ID:
-    raise Exception("Telegram env vars missing")
-# ======================
-# DEBUG  MAY DELETE
-# ======================
-import os
+    raise Exception("Missing Telegram environment variables")
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-CHAT_ID = os.getenv("CHAT_ID")
-TELNYX_API_KEY = os.getenv("TELNYX_API_KEY")
-
-print("BOT_TOKEN:", BOT_TOKEN)
-print("CHAT_ID:", CHAT_ID)
-print("TELNYX_API_KEY:", bool(TELNYX_API_KEY))
 # ======================
 # MEMORY
 # ======================
 sessions = {}
-active_calls = {}   # ✅ FIXED (WAS MISSING)
+active_calls = {}
 
-SESSION_WINDOW = 30 * 60
+SESSION_WINDOW = 30 * 60  # 30 minutes
 
 # ======================
 # HELPERS
@@ -53,60 +40,55 @@ def send_telegram(text):
             "chat_id": CHAT_ID,
             "text": text
         })
-    except Exception as e:
-        print("TELEGRAM ERROR:", str(e))
+    except:
+        pass
 
-def make_session_key(from_number, to_number):
-    return f"{from_number}→{to_number}"
+def session_key(a, b):
+    return f"{a}→{b}"
 
 def get_session(key):
-    session = sessions.get(key)
-
-    if session and (now_ts() - session["last_update"] > SESSION_WINDOW):
+    s = sessions.get(key)
+    if s and (now_ts() - s["last_update"] > SESSION_WINDOW):
         sessions.pop(key, None)
         return None
-
-    return session
+    return s
 
 def update_session(from_number, to_number, msg, msg_type):
-    key = make_session_key(from_number, to_number)
+    key = session_key(from_number, to_number)
+    s = get_session(key)
 
-    session = get_session(key)
-
-    if not session:
-        session = {
+    if not s:
+        s = {
             "from": from_number,
             "to": to_number,
-            "last_message": msg,
+            "last": msg,
             "type": msg_type,
             "created": now_readable(),
             "last_update": now_ts(),
             "count": 1
         }
-        sessions[key] = session
+        sessions[key] = s
     else:
-        session["last_message"] = msg
-        session["type"] = msg_type
-        session["last_update"] = now_ts()
-        session["count"] += 1
+        s["last"] = msg
+        s["type"] = msg_type
+        s["last_update"] = now_ts()
+        s["count"] += 1
 
-    return key, session
+    return key, s
 
-def render_inbox():
+def inbox():
     if not sessions:
         return "📱 INBOX EMPTY"
 
-    text = "📱 *WHATSAPP STYLE INBOX*\n\n"
-
-    for key, s in sessions.items():
-        text += f"""📞 {key}
-💬 {s['last_message']}
-📌 {s['type']}
-🕒 {s['created']} → {now_readable()}
-🔁 msgs: {s['count']}
-
-"""
-
+    text = "📱 WHATSAPP STYLE INBOX\n\n"
+    for k, s in sessions.items():
+        text += (
+            f"{k}\n"
+            f"💬 {s['last']}\n"
+            f"📌 {s['type']}\n"
+            f"🕒 {s['created']}\n"
+            f"🔁 {s['count']} msgs\n\n"
+        )
     return text
 
 # ======================
@@ -114,58 +96,46 @@ def render_inbox():
 # ======================
 @app.route("/sms", methods=["POST"])
 def sms():
-    data = request.json
-    print("SMS INCOMING:", data)
-
     try:
+        data = request.json
         payload = data["data"]["payload"]
 
-        message = payload.get("text", "")
+        msg = payload.get("text", "")
         sender = payload["from"]["phone_number"]
         to_number = payload["to"][0]["phone_number"]
 
-        update_session(sender, to_number, message, "SMS")
+        update_session(sender, to_number, msg, "SMS")
 
-        send_telegram(f"""📩 SMS
-
-From: {sender}
-To: {to_number}
-
-{message}
-
----
-{render_inbox()}
-""")
+        send_telegram(
+            f"📩 SMS\n\nFrom: {sender}\nTo: {to_number}\n\n{msg}\n\n{inbox()}"
+        )
 
         return {"ok": True}
 
-    except Exception as e:
-        print("SMS ERROR:", str(e))
-        return {"error": str(e)}
+    except:
+        return {"error": "sms failed"}
 
 # ======================
 # TELEGRAM → SMS
 # ======================
 @app.route("/telegram", methods=["POST"])
 def telegram():
-    data = request.json
-    print("TELEGRAM INCOMING:", data)
-
     try:
-        message = data.get("message", {}).get("text", "")
+        data = request.json
+        msg = data.get("message", {}).get("text", "")
 
-        if not message.startswith("/reply"):
-            send_telegram(render_inbox())
+        if not msg.startswith("/reply"):
+            send_telegram(inbox())
             return {"ok": True}
 
-        parts = message.split(" ", 2)
+        parts = msg.split(" ", 2)
 
         if len(parts) < 3:
-            send_telegram("⚠️ Format: /reply number message")
+            send_telegram("⚠️ Use /reply number message")
             return {"error": "bad format"}
 
         number = parts[1]
-        text_message = parts[2]
+        text = parts[2]
 
         url = "https://api.telnyx.com/v2/messages"
         headers = {
@@ -173,40 +143,28 @@ def telegram():
             "Content-Type": "application/json"
         }
 
-        payload = {
+        requests.post(url, json={
             "from": number,
             "to": number,
-            "text": text_message
-        }
+            "text": text
+        }, headers=headers)
 
-        requests.post(url, json=payload, headers=headers)
+        update_session(number, number, text, "OUTGOING")
 
-        update_session(number, number, text_message, "OUTGOING")
-
-        send_telegram(f"""✅ SENT
-
-To: {number}
-Message: {text_message}
-
----
-{render_inbox()}
-""")
+        send_telegram(f"✅ SENT\n\nTo: {number}\n\n{text}\n\n{inbox()}")
 
         return {"ok": True}
 
-    except Exception as e:
-        print("TELEGRAM ERROR:", str(e))
-        return {"error": str(e)}
+    except:
+        return {"error": "telegram failed"}
 
 # ======================
-# VOICE EVENTS (CALLS)
+# VOICE / CALL EVENTS
 # ======================
 @app.route("/voice", methods=["POST"])
 def voice():
-    data = request.json
-    print("VOICE INCOMING:", data)
-
     try:
+        data = request.json
         event = data.get("data", {}).get("event_type", "")
         payload = data.get("data", {}).get("payload", {})
 
@@ -214,9 +172,7 @@ def voice():
         from_number = payload.get("from")
         to_number = payload.get("to")
 
-        # -------------------------
-        # CALL STARTED
-        # -------------------------
+        # CALL START (RINGING)
         if event == "call.initiated":
             active_calls[call_id] = {
                 "from": from_number,
@@ -225,24 +181,21 @@ def voice():
                 "time": now_readable()
             }
 
-        # -------------------------
+            send_telegram(
+                f"📞 RINGING\nFrom: {from_number}\nTo: {to_number}\nTime: {now_readable()}"
+            )
+
         # CALL ANSWERED
-        # -------------------------
         elif event == "call.answered":
             if call_id in active_calls:
                 active_calls[call_id]["answered"] = True
 
-            send_telegram(f"""📞 CALL ANSWERED
+            send_telegram(
+                f"📞 ANSWERED\nFrom: {from_number}\nTo: {to_number}"
+            )
 
-From: {from_number}
-To: {to_number}
-""")
-
-        # -------------------------
         # CALL ENDED
-        # -------------------------
         elif event == "call.hangup":
-
             call = active_calls.get(call_id, {
                 "from": from_number,
                 "to": to_number,
@@ -251,71 +204,77 @@ To: {to_number}
             })
 
             if not call["answered"]:
-                send_telegram(f"""📞 MISSED CALL
-
-From: {call['from']}
-To: {call['to']}
-Time: {call['time']}
-""")
+                send_telegram(
+                    f"📞 MISSED CALL\nFrom: {call['from']}\nTo: {call['to']}\nTime: {call['time']}"
+                )
             else:
-                send_telegram(f"""📞 CALL ENDED
-
-From: {call['from']}
-To: {call['to']}
-""")
+                send_telegram(
+                    f"📞 CALL ENDED\nFrom: {call['from']}\nTo: {call['to']}"
+                )
 
             active_calls.pop(call_id, None)
 
         return {"ok": True}
 
+    except:
+        return {"error": "voice failed"}
+
+# ======================
+# FAX OUTGOING
+# ======================
+def send_fax(to_number, pdf_url):
+    try:
+        url = "https://api.telnyx.com/v2/faxes"
+        headers = {
+            "Authorization": f"Bearer {TELNYX_API_KEY}",
+            "Content-Type": "application/json"
+        }
+
+        r = requests.post(url, json={
+            "to": to_number,
+            "media_url": pdf_url
+        }, headers=headers)
+
+        send_telegram(f"📠 FAX SENT\nTo: {to_number}\nFile: {pdf_url}")
+
+        return r.json()
+
     except Exception as e:
-        print("VOICE ERROR:", str(e))
+        send_telegram(f"❌ FAX ERROR\n{str(e)}")
         return {"error": str(e)}
 
 # ======================
-# CALL LOG
+# FAX INBOUND ALERTS
 # ======================
-@app.route("/call-log", methods=["POST"])
-def call_log():
-    data = request.json
-    print("CALL LOG:", data)
-    return {"ok": True}
+@app.route("/fax", methods=["POST"])
+def fax():
+    try:
+        data = request.json
+        payload = data.get("data", {}).get("payload", {})
+
+        from_number = payload.get("from")
+        to_number = payload.get("to")
+        status = payload.get("status", "unknown")
+        media_url = payload.get("media_url")
+
+        send_telegram(
+            f"📠 FAX RECEIVED\nFrom: {from_number}\nTo: {to_number}\nStatus: {status}\n\nFile:\n{media_url}"
+        )
+
+        return {"ok": True}
+
+    except:
+        return {"error": "fax failed"}
 
 # ======================
-# HEALTH
+# HEALTH CHECK
 # ======================
 @app.route("/")
 def home():
     return "OK"
-# ======================
-# TEMP DELETE
-# ======================
-@app.route("/test")
-def test():
-    send_telegram("✅ Telegram test successful")
-    return "sent"
 
 # ======================
 # RUN
 # ======================
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
-
-# ======================
-# FAX
-# ======================
-def send_fax(to_number, pdf_url):
-    url = "https://api.telnyx.com/v2/faxes"
-
-    headers = {
-        "Authorization": f"Bearer {TELNYX_API_KEY}",
-        "Content-Type": "application/json"
-    }
-
-    payload = {
-        "to": to_number,
-        "from": TELNYX_FAX_NUMBER,
-        "media_url": pdf_url
-    }
-
-    return requests.post(url, json=payload, headers=headers).json()
