@@ -10,9 +10,13 @@ app = Flask(__name__)
 # CONFIG
 # ======================
 import os
+
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 TELNYX_API_KEY = os.getenv("TELNYX_API_KEY")
+
+if not BOT_TOKEN or not CHAT_ID:
+    raise Exception("Telegram env vars missing")
 # ======================
 # DEBUG  MAY DELETE
 # ======================
